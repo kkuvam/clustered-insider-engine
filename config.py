@@ -54,7 +54,7 @@ class StrategyConfig:
     # information asymmetry for insiders to exploit). Disabled (0.0 = no-op) by default.
     MIN_PRICE: float = 0.0
     MIN_DOLLAR_VOLUME: float = 0.0  # 20-day avg dollar volume floor (close * volume)
-    MAX_DOLLAR_VOLUME: Optional[float] = None  # ceiling to exclude mega-caps; None disables it
+    MAX_DOLLAR_VOLUME: Optional[float] = 2_500_000.0  # ceiling to exclude mega-caps; None disables it
 
     # Execution Parameters
     HOLDING_PERIODS: Tuple[int, ...] = (30, 60, 90)

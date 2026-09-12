@@ -53,6 +53,50 @@ class PortfolioSimulator:
         daily_pnl["equity"] = self.initial_capital + daily_pnl["daily_pnl"].cumsum()
         return daily_pnl.reset_index(drop=True)
 
+    def simulate_dynamic(
+        self,
+        backtest_df: pd.DataFrame,
+        mode: str = "compound",
+        drawdown_threshold: float = 0.10,
+        throttle_factor: float = 0.5,
+    ) -> pd.DataFrame:
+        """Equity curve with position size tied to current account equity.
+
+        mode="compound": position_size = current_equity * position_size_pct,
+        so size grows as wins accumulate and shrinks as losses accumulate.
+        mode="throttle": same as fixed sizing, but position_size_pct is cut
+        by throttle_factor whenever current equity is drawdown_threshold or
+        more below its running peak, and restored once equity recovers.
+        """
+        trades = backtest_df[backtest_df["entry_trade"]].dropna(subset=["exit_date", "trade_return"])
+        if trades.empty:
+            return pd.DataFrame(columns=["date", "daily_pnl", "equity"])
+
+        grouped = (
+            trades.sort_values("exit_date")
+            .groupby("exit_date")["trade_return"]
+            .apply(list)
+            .reset_index()
+        )
+
+        equity = self.initial_capital
+        peak = self.initial_capital
+        rows = []
+        for _, row in grouped.iterrows():
+            if mode == "throttle":
+                drawdown = (equity - peak) / peak if peak > 0 else 0.0
+                pct = self.position_size_pct * throttle_factor if drawdown <= -drawdown_threshold \
+                    else self.position_size_pct
+            else:
+                pct = self.position_size_pct
+            position_size = equity * pct
+            daily_pnl = sum(r * position_size for r in row["trade_return"])
+            equity += daily_pnl
+            peak = max(peak, equity)
+            rows.append({"date": row["exit_date"], "daily_pnl": daily_pnl, "equity": equity})
+
+        return pd.DataFrame(rows)
+
     def compute_performance(self, equity_curve: pd.DataFrame) -> dict:
         """Computes portfolio-level Sharpe ratio and max drawdown from the equity curve."""
         if equity_curve.empty:

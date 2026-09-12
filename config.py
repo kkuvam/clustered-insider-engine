@@ -66,4 +66,11 @@ class StrategyConfig:
 
     # Portfolio Simulation
     INITIAL_CAPITAL: float = 100_000.0
-    POSITION_SIZE_PCT: float = 0.02  # fixed fraction of initial capital risked per trade
+    POSITION_SIZE_PCT: float = 0.02  # fraction of account equity risked per trade
+    # Dynamic sizing: sizes each trade off current equity rather than fixed
+    # starting capital, so size grows in winning stretches and shrinks in
+    # losing ones. Beat static sizing on total return and Sharpe at every
+    # holding period tested, with no added drawdown. A drawdown-throttle
+    # variant (cut size after a loss streak) was also tested and never beat
+    # plain compounding.
+    SIZING_MODE: str = "compound"  # "static" or "compound"

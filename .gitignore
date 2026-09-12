@@ -3,21 +3,44 @@
 .env.*
 !.env.example
 
-# Local Python environments
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
 venv/
 .venv/
 env/
+.python-version
 
-# Generated market data and backtest output
-data/
-
-# Python caches and test artifacts
-__pycache__/
-*.py[cod]
+# Test / lint / type-check caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+.tox/
 
-# Local editor and OS files
-.DS_Store
+# Jupyter
+.ipynb_checkpoints/
+
+# Generated market data and backtest output
+data/
+*.log
+
+# Editor / IDE
 .vscode/
+.idea/
+
+# OS files
+.DS_Store
+
+# Local Claude Code instructions
+CLAUDE.md

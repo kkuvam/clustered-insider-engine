@@ -1,12 +1,12 @@
 """
 Data Engineering Client updated to extract SEC Form 4 Rule 10b5-1 plan metadata.
 
-Also adds two new cache-first endpoints not yet consumed by signal_engine.py:
+Also adds two new cache-first endpoints, wired into load_dataset() but not yet
+consumed by signal_engine.py:
   - fetch_short_interest(): GET /stocks/v1/short-interest (bi-weekly FINRA data)
   - fetch_earnings(): GET /benzinga/v1/earnings (partner add-on; requires Benzinga
     entitlement on your Massive plan -- returns an empty frame if not entitled,
     since _get_raw treats 401/402/403/404 as non-retryable)
-Neither is wired into load_dataset() yet; call them directly per-ticker.
 """
 from __future__ import annotations
 
@@ -359,8 +359,10 @@ class MassiveDataClient:
 
     def load_dataset(
         self, ticker: str, start_date: str = "2021-01-01", end_date: str = "2026-01-01"
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         price_df = self.fetch_ohlcv(ticker, start_date, end_date)
         insider_df = self.fetch_insider_transactions(ticker, start_date, end_date)
         fund_df = self.fetch_fundamentals(ticker, start_date, end_date)
-        return price_df, insider_df, fund_df
+        short_interest_df = self.fetch_short_interest(ticker, start_date, end_date)
+        earnings_df = self.fetch_earnings(ticker, start_date, end_date)
+        return price_df, insider_df, fund_df, short_interest_df, earnings_df

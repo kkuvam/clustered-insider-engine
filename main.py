@@ -28,7 +28,7 @@ def process_single_ticker(
 ) -> pd.DataFrame:
     """Worker function executed concurrently per candidate ticker."""
     try:
-        price_df, insider_df, fund_df = client.load_dataset(
+        price_df, insider_df, fund_df, _short_interest_df, _earnings_df = client.load_dataset(
             ticker, start_date=start_date, end_date=end_date
         )
 

@@ -1,5 +1,5 @@
 """
-Event-Aligned Backtesting Engine with Trailing Stop-Loss Execution.
+Event-Aligned Backtesting Engine with Stop-Loss and Take-Profit Execution.
 """
 from __future__ import annotations
 import numpy as np
@@ -10,14 +10,21 @@ class EventBacktester:
     def __init__(
         self,
         holding_period_days: int = 30,
-        trailing_stop_pct: float | None = 0.15,
+        stop_loss_pct: float | None = 0.15,
+        take_profit_pct: float | None = None,
+        trailing_stop: bool = True,
     ):
         """
         :param holding_period_days: Maximum holding period in trading days.
-        :param trailing_stop_pct: Dynamic drawdown percentage threshold from peak trade price.
+        :param stop_loss_pct: Drawdown percentage threshold that exits the trade.
+        :param take_profit_pct: Gain percentage threshold that exits the trade. None disables it.
+        :param trailing_stop: True ratchets the stop up from the post-entry high-water mark.
+            False fixes the stop at stop_loss_pct below the entry price for the whole trade.
         """
         self.holding_period = holding_period_days
-        self.trailing_stop_pct = trailing_stop_pct
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+        self.trailing_stop = trailing_stop
 
     def execute_trades(self, signal_df: pd.DataFrame) -> pd.DataFrame:
         if signal_df.empty:
@@ -61,9 +68,19 @@ class EventBacktester:
                     exit_p = closes[max_exit_idx]
                     reason = "TIME_EXIT"
 
-                    # Trailing Stop Execution Logic
-                    if self.trailing_stop_pct is not None:
+                    # Stop-Loss and Take-Profit Execution Logic
+                    if self.stop_loss_pct is not None or self.take_profit_pct is not None:
                         peak_price = max(entry_p, highs[entry_idx])
+                        fixed_stop_price = (
+                            entry_p * (1.0 - self.stop_loss_pct)
+                            if self.stop_loss_pct is not None
+                            else None
+                        )
+                        take_profit_price = (
+                            entry_p * (1.0 + self.take_profit_pct)
+                            if self.take_profit_pct is not None
+                            else None
+                        )
 
                         for day in range(entry_idx, max_exit_idx + 1):
                             # Update running peak price (High Water Mark)
@@ -71,14 +88,24 @@ class EventBacktester:
                             if current_high > peak_price:
                                 peak_price = current_high
 
-                            # Trailing stop price boundary ratchets upward
-                            stop_price = peak_price * (1.0 - self.trailing_stop_pct)
+                            # Stop price: ratchets up with the peak if trailing, else fixed at entry
+                            if self.stop_loss_pct is not None:
+                                stop_price = (
+                                    peak_price * (1.0 - self.stop_loss_pct)
+                                    if self.trailing_stop
+                                    else fixed_stop_price
+                                )
+                                if lows[day] <= stop_price:
+                                    actual_exit_idx = day
+                                    exit_p = stop_price
+                                    reason = "STOP_LOSS"
+                                    break
 
-                            # Check if daily Low breaches trailing stop
-                            if lows[day] <= stop_price:
+                            # Take-profit checked after stop-loss on the same day (conservative)
+                            if take_profit_price is not None and current_high >= take_profit_price:
                                 actual_exit_idx = day
-                                exit_p = stop_price
-                                reason = "TRAILING_STOP"
+                                exit_p = take_profit_price
+                                reason = "TAKE_PROFIT"
                                 break
 
                     ret = (exit_p - entry_p) / entry_p

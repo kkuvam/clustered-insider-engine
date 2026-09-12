@@ -49,4 +49,6 @@ class StrategyConfig:
     # Execution Parameters
     HOLDING_PERIODS: Tuple[int, ...] = (30, 60, 90)
     MAX_TRADE_RETURN_CAP: float = 5.0
-    TRAILING_STOP_PCT: Optional[float] = 0.15  # 15% trailing stop from high-water mark
+    STOP_LOSS_PCT: Optional[float] = 0.15  # fixed 15% stop-loss from entry price
+    TAKE_PROFIT_PCT: Optional[float] = 0.30  # fixed 30% take-profit from entry price
+    TRAILING_STOP: bool = False  # fixed stop beat trailing stop in the exit-strategy sweep

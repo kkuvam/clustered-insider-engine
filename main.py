@@ -107,7 +107,12 @@ def main():
     print("\nExecuting Vectorized Full-Market Simulations...")
 
     for N in config.HOLDING_PERIODS:
-        backtester = EventBacktester(holding_period_days=N)
+        backtester = EventBacktester(
+            holding_period_days=N,
+            stop_loss_pct=config.STOP_LOSS_PCT,
+            take_profit_pct=config.TAKE_PROFIT_PCT,
+            trailing_stop=config.TRAILING_STOP,
+        )
         bt_df = backtester.execute_trades(combined_signals_df)
         metrics = backtester.compute_performance(bt_df)
         results.append(metrics)

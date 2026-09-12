@@ -53,6 +53,57 @@ class PortfolioSimulator:
         daily_pnl["equity"] = self.initial_capital + daily_pnl["daily_pnl"].cumsum()
         return daily_pnl.reset_index(drop=True)
 
+    def _run_entry_ordered(self, backtest_df: pd.DataFrame, size_fn) -> pd.DataFrame:
+        """Shared engine for every equity-tied sizing mode.
+
+        Processes trades in entry-date order (not exit-date order) so a
+        trade's position size only ever reflects pnl already realized
+        before that trade's own entry. Sizing by exit-date order let a
+        trade's size be inflated by a different trade that entered later
+        but happened to close first, a look-ahead bug found and fixed
+        after a capital-constrained validation run disagreed with this
+        module's numbers: 30-day total return dropped from 132.3% to
+        113.7% and portfolio Sharpe from 2.088 to 1.986 once fixed, the
+        gap between the buggy and correct sizing schedule.
+
+        size_fn(equity, peak_equity, num_open_positions) -> dollar size
+        for the trade about to be entered.
+        """
+        trades = backtest_df[backtest_df["entry_trade"]].dropna(subset=["date", "exit_date", "trade_return"])
+        if trades.empty:
+            return pd.DataFrame(columns=["date", "daily_pnl", "equity"])
+
+        trades = trades.sort_values("date")
+        equity = self.initial_capital
+        peak = self.initial_capital
+        open_positions = []  # (exit_date, dollar_size, trade_return)
+        daily_pnl = {}  # exit_date -> summed pnl, one row per calendar date
+
+        for _, trade in trades.iterrows():
+            still_open = []
+            for exit_date, size, ret in open_positions:
+                if exit_date <= trade["date"]:
+                    pnl = ret * size
+                    equity += pnl
+                    peak = max(peak, equity)
+                    daily_pnl[exit_date] = daily_pnl.get(exit_date, 0.0) + pnl
+                else:
+                    still_open.append((exit_date, size, ret))
+            open_positions = still_open
+
+            position_size = size_fn(equity, peak, len(open_positions))
+            open_positions.append((trade["exit_date"], position_size, trade["trade_return"]))
+
+        for exit_date, size, ret in open_positions:
+            pnl = ret * size
+            daily_pnl[exit_date] = daily_pnl.get(exit_date, 0.0) + pnl
+
+        curve = pd.DataFrame(sorted(daily_pnl.items()), columns=["date", "daily_pnl"])
+        if curve.empty:
+            return pd.DataFrame(columns=["date", "daily_pnl", "equity"])
+        curve["equity"] = self.initial_capital + curve["daily_pnl"].cumsum()
+        return curve
+
     def simulate_dynamic(
         self,
         backtest_df: pd.DataFrame,
@@ -77,36 +128,18 @@ class PortfolioSimulator:
         original stake, and self-corrects back to the base rate as soon
         as a losing streak erases the cushion.
         """
-        trades = backtest_df[backtest_df["entry_trade"]].dropna(subset=["exit_date", "trade_return"])
-        if trades.empty:
-            return pd.DataFrame(columns=["date", "daily_pnl", "equity"])
 
-        grouped = (
-            trades.sort_values("exit_date")
-            .groupby("exit_date")["trade_return"]
-            .apply(list)
-            .reset_index()
-        )
-
-        equity = self.initial_capital
-        peak = self.initial_capital
-        rows = []
-        for _, row in grouped.iterrows():
+        def size_fn(equity, peak, _num_open):
             if mode == "throttle":
                 drawdown = (equity - peak) / peak if peak > 0 else 0.0
                 pct = self.position_size_pct * throttle_factor if drawdown <= -drawdown_threshold \
                     else self.position_size_pct
-                position_size = equity * pct
-            elif mode == "house_money":
-                position_size = self._house_money_size(equity, aggressive_pct)
-            else:
-                position_size = equity * self.position_size_pct
-            daily_pnl = sum(r * position_size for r in row["trade_return"])
-            equity += daily_pnl
-            peak = max(peak, equity)
-            rows.append({"date": row["exit_date"], "daily_pnl": daily_pnl, "equity": equity})
+                return equity * pct
+            if mode == "house_money":
+                return self._house_money_size(equity, aggressive_pct)
+            return equity * self.position_size_pct
 
-        return pd.DataFrame(rows)
+        return self._run_entry_ordered(backtest_df, size_fn)
 
     def _house_money_size(self, equity: float, aggressive_pct: float) -> float:
         safe_base = min(equity, self.initial_capital)
@@ -127,37 +160,12 @@ class PortfolioSimulator:
         capital spreads thinner during signal-dense stretches instead of
         assuming unlimited concurrent capacity, unlike every mode above.
         """
-        trades = backtest_df[backtest_df["entry_trade"]].dropna(subset=["date", "exit_date", "trade_return"])
-        if trades.empty:
-            return pd.DataFrame(columns=["date", "daily_pnl", "equity"])
 
-        trades = trades.sort_values("date")
-        equity = self.initial_capital
-        open_positions = []  # (exit_date, dollar_size, trade_return)
-        daily_pnl = {}  # exit_date -> summed pnl, one row per calendar date like simulate()
-
-        for _, trade in trades.iterrows():
-            still_open = []
-            for exit_date, size, ret in open_positions:
-                if exit_date <= trade["date"]:
-                    pnl = ret * size
-                    equity += pnl
-                    daily_pnl[exit_date] = daily_pnl.get(exit_date, 0.0) + pnl
-                else:
-                    still_open.append((exit_date, size, ret))
-            open_positions = still_open
-
+        def size_fn(equity, _peak, num_open):
             base_size = self._house_money_size(equity, aggressive_pct)
-            position_size = base_size / (1 + decay_rate * len(open_positions))
-            open_positions.append((trade["exit_date"], position_size, trade["trade_return"]))
+            return base_size / (1 + decay_rate * num_open)
 
-        for exit_date, size, ret in open_positions:
-            pnl = ret * size
-            daily_pnl[exit_date] = daily_pnl.get(exit_date, 0.0) + pnl
-
-        curve = pd.DataFrame(sorted(daily_pnl.items()), columns=["date", "daily_pnl"])
-        curve["equity"] = self.initial_capital + curve["daily_pnl"].cumsum()
-        return curve
+        return self._run_entry_ordered(backtest_df, size_fn)
 
     def compute_performance(self, equity_curve: pd.DataFrame) -> dict:
         """Computes portfolio-level Sharpe ratio and max drawdown from the equity curve."""

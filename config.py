@@ -60,10 +60,12 @@ class StrategyConfig:
     HOLDING_PERIODS: Tuple[int, ...] = (30, 60, 90)
     MAX_TRADE_RETURN_CAP: float = 5.0
     # Widened from 0.15 to 0.20 by user choice: at 30-day holding + 50% trail
-    # activation, 0.20 lifts total return from 103.3% to 132.3% for only
-    # -11.46% -> -12.99% extra drawdown (portfolio Sharpe 2.107 -> 2.088).
-    # The same widening hurts 60/90-day much more (drawdown grows to -16.3%),
-    # since this is a single global setting applied to every holding period.
+    # activation, 0.20 lifts total return over 0.15 for only a small extra
+    # drawdown (portfolio Sharpe barely moves). The same widening hurts
+    # 60/90-day much more (drawdown grows a lot), since this is a single
+    # global setting applied to every holding period. Figures in the
+    # decision journal reflect the entry-ordered sizing fix in
+    # portfolio_simulator.py; the relative comparison here is unaffected.
     STOP_LOSS_PCT: Optional[float] = 0.20  # fixed stop-loss from entry price
     TAKE_PROFIT_PCT: Optional[float] = 0.30  # fixed 30% take-profit from entry price
     TRAILING_STOP: bool = False  # fixed stop beat trailing stop in the exit-strategy sweep

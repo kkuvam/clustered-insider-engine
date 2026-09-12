@@ -14,6 +14,7 @@ import pandas as pd
 from backtester import EventBacktester
 from config import StrategyConfig, DATA_DIR
 from data_client import MassiveDataClient
+from portfolio_simulator import PortfolioSimulator
 from signal_engine import VectorizedSignalEngine
 from universe_scanner import DynamicUniverseScanner
 
@@ -116,6 +117,13 @@ def main():
         )
         bt_df = backtester.execute_trades(combined_signals_df)
         metrics = backtester.compute_performance(bt_df)
+
+        portfolio = PortfolioSimulator(
+            initial_capital=config.INITIAL_CAPITAL, position_size_pct=config.POSITION_SIZE_PCT
+        )
+        equity_curve = portfolio.simulate(bt_df)
+        portfolio_metrics = portfolio.compute_performance(equity_curve)
+        metrics.update(portfolio_metrics)
         results.append(metrics)
 
         executed_trades = bt_df[bt_df["entry_trade"]].copy()
@@ -143,6 +151,10 @@ def main():
                 "weighted_sharpe_ratio",
                 "max_loss",
                 "max_gain",
+                "final_equity",
+                "total_return_pct",
+                "portfolio_sharpe",
+                "max_drawdown_pct",
             ]
         ].to_string(index=False)
     )

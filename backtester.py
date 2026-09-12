@@ -44,6 +44,7 @@ class EventBacktester:
         exit_prices = np.full(n_rows, np.nan)
         trade_returns = np.full(n_rows, np.nan)
         position_weights = np.full(n_rows, np.nan)
+        exit_dates = [pd.NaT] * n_rows
         exit_reasons = [None] * n_rows
 
         for ticker, group in df.groupby("ticker", sort=False):
@@ -55,6 +56,7 @@ class EventBacktester:
             closes = group["close"].to_numpy()
             highs = group["high"].to_numpy() if "high" in group.columns else closes
             lows = group["low"].to_numpy() if "low" in group.columns else closes
+            dates = group["date"].to_numpy()
             weights = (
                 group["position_weight"].to_numpy() if "position_weight" in group.columns
                 else np.ones(n)
@@ -126,6 +128,7 @@ class EventBacktester:
                     exit_prices[global_entry_idx] = exit_p
                     trade_returns[global_entry_idx] = ret
                     position_weights[global_entry_idx] = weights[i]
+                    exit_dates[global_entry_idx] = dates[actual_exit_idx]
                     exit_reasons[global_entry_idx] = reason
 
                     # Fast-forward pointer to clear active trade window
@@ -138,6 +141,7 @@ class EventBacktester:
         df["exit_price"] = exit_prices
         df["trade_return"] = trade_returns
         df["trade_position_weight"] = position_weights
+        df["exit_date"] = exit_dates
         df["exit_reason"] = exit_reasons
 
         return df

@@ -32,14 +32,19 @@ Tier-2 refinement applied:
     of 1.0. Not consumed by the backtester's core P&L yet, only surfaced
     for weighted performance metrics.
 
+Liquidity / micro-cap filter applied:
+  - No historical market-cap data is available (see below), so a price floor
+    (MIN_PRICE) and a 20-day average dollar volume floor (MIN_DOLLAR_VOLUME)
+    proxy the small-cap/illiquid tilt using data already in hand.
+
 Tier-2 NOT implemented: earnings-proximity timing has no supporting data,
 since the account's Massive plan lacks the Benzinga earnings entitlement
 (fetch_earnings() always returns empty).
 Not implemented:
-  - Small-cap / low-coverage tilt — every local raw_fundamentals/*.parquet
+  - True market-cap-based small-cap tilt — every local raw_fundamentals/*.parquet
     file has the right schema but 0 rows (confirmed across all 4,489 files),
-    so any market_cap-based filter is a permanent no-op against this dataset.
-    Dropped rather than kept as dead weight.
+    so a market_cap-based filter is a permanent no-op against this dataset.
+    Proxied instead via price and dollar volume (see above).
   - Role-weighted conviction (CEO/CFO vs. director) — the local insider
     dataset has no officer/director/title field to weight by.
 
@@ -88,6 +93,24 @@ class VectorizedSignalEngine:
         # No prior history means no baseline, so it gets the neutral weight of 1.0.
         # Capped at 5.0 so one outlier buy can't dominate the day's position weight.
         df["conviction_ratio"] = (df["value"] / prior_avg_value).clip(upper=5.0).fillna(1.0)
+        return df
+
+    def _flag_liquidity(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Excludes penny stocks and illiquid names using price and dollar volume.
+
+        No historical market-cap data is available (see module docstring), so
+        this proxies a small-cap/illiquid tilt using data already in hand: a
+        minimum price and a 20-day average dollar volume floor.
+        """
+        df["avg_dollar_volume_20d"] = (
+            (df["close"] * df["volume"]).rolling(window=20, min_periods=1).mean()
+        )
+        df["pass_liquidity"] = (
+            (df["close"] >= self.config.MIN_PRICE)
+            & (df["avg_dollar_volume_20d"] >= self.config.MIN_DOLLAR_VOLUME)
+        )
+        if self.config.MAX_DOLLAR_VOLUME is not None:
+            df["pass_liquidity"] &= df["avg_dollar_volume_20d"] <= self.config.MAX_DOLLAR_VOLUME
         return df
 
     def _flag_short_interest_overlap(self, df: pd.DataFrame, short_interest_df: pd.DataFrame) -> pd.DataFrame:
@@ -206,10 +229,15 @@ class VectorizedSignalEngine:
         # 2. Tier-2: Short-Interest Overlap
         df = self._flag_short_interest_overlap(df, short_interest_df)
 
-        # 3. Composite Validation
+        # 3. Liquidity / Micro-Cap Floor
+        df = self._flag_liquidity(df)
+
+        # 4. Composite Validation
         # fund_df is accepted for interface compatibility but unused: every local
         # raw_fundamentals file is schema-correct but empty (0 rows), so any
         # market-cap-based filter would be a permanent no-op against this dataset.
-        df["signal_valid"] = df["pass_insider_cluster"] & df["pass_short_interest"]
+        df["signal_valid"] = (
+            df["pass_insider_cluster"] & df["pass_short_interest"] & df["pass_liquidity"]
+        )
 
         return df

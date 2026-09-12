@@ -46,6 +46,16 @@ class StrategyConfig:
     # Tier-2: Short Interest Overlap
     MIN_DAYS_TO_COVER: float = 2.0  # signal requires short-side days-to-cover >= N at time of signal
 
+    # Liquidity / Micro-Cap Floor (no market-cap data available, so proxied via price and volume)
+    # Tested MIN_PRICE=5.0 / MIN_DOLLAR_VOLUME=1_000_000 against real data: it turned
+    # every holding period negative (60-day total return went from +16.8% to -9.2%).
+    # The strategy's real edge comes disproportionately from micro-cap/illiquid names,
+    # consistent with the insider-trading literature (less analyst coverage means more
+    # information asymmetry for insiders to exploit). Disabled (0.0 = no-op) by default.
+    MIN_PRICE: float = 0.0
+    MIN_DOLLAR_VOLUME: float = 0.0  # 20-day avg dollar volume floor (close * volume)
+    MAX_DOLLAR_VOLUME: Optional[float] = None  # ceiling to exclude mega-caps; None disables it
+
     # Execution Parameters
     HOLDING_PERIODS: Tuple[int, ...] = (30, 60, 90)
     MAX_TRADE_RETURN_CAP: float = 5.0
@@ -53,3 +63,7 @@ class StrategyConfig:
     TAKE_PROFIT_PCT: Optional[float] = 0.30  # fixed 30% take-profit from entry price
     TRAILING_STOP: bool = False  # fixed stop beat trailing stop in the exit-strategy sweep
     TRANSACTION_COST_PCT: float = 0.002  # 20 bps round-trip commission + slippage estimate
+
+    # Portfolio Simulation
+    INITIAL_CAPITAL: float = 100_000.0
+    POSITION_SIZE_PCT: float = 0.02  # fixed fraction of initial capital risked per trade

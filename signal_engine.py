@@ -24,6 +24,14 @@ Tier-2 refinement applied:
     MIN_DAYS_TO_COVER. Insider buying against a crowded short is a stronger
     contrarian signal than insider buying alone.
 
+Tier-2 refinement applied:
+  - Conviction-weighted position sizing: each signal day carries a
+    "position_weight" column, the average conviction_ratio (buy value /
+    insider's own prior average buy, capped at 5.0) across that day's
+    qualifying buys. Days with no insider buy default to a neutral weight
+    of 1.0. Not consumed by the backtester's core P&L yet, only surfaced
+    for weighted performance metrics.
+
 Tier-2 NOT implemented: earnings-proximity timing has no supporting data,
 since the account's Massive plan lacks the Benzinga earnings entitlement
 (fetch_earnings() always returns empty).
@@ -76,6 +84,10 @@ class VectorizedSignalEngine:
             prior_avg_value.isna()
             | (df["value"] >= self.config.CONVICTION_SIZE_MULTIPLIER * prior_avg_value)
         )
+        # Conviction ratio: how many multiples of the insider's own norm this buy is.
+        # No prior history means no baseline, so it gets the neutral weight of 1.0.
+        # Capped at 5.0 so one outlier buy can't dominate the day's position weight.
+        df["conviction_ratio"] = (df["value"] / prior_avg_value).clip(upper=5.0).fillna(1.0)
         return df
 
     def _flag_short_interest_overlap(self, df: pd.DataFrame, short_interest_df: pd.DataFrame) -> pd.DataFrame:
@@ -158,6 +170,7 @@ class VectorizedSignalEngine:
                 .agg(
                     daily_unique_buyers=("insider_id", "nunique"),
                     daily_total_value=("value", "sum"),
+                    daily_conviction_ratio=("conviction_ratio", "mean"),
                 )
                 .reset_index()
                 .rename(columns={"trading_date": "date"})
@@ -166,9 +179,11 @@ class VectorizedSignalEngine:
             df = df.merge(daily_insider_stats, on="date", how="left")
             df["daily_unique_buyers"] = df["daily_unique_buyers"].fillna(0)
             df["daily_total_value"] = df["daily_total_value"].fillna(0.0)
+            df["position_weight"] = df["daily_conviction_ratio"].fillna(1.0)
         else:
             df["daily_unique_buyers"] = 0
             df["daily_total_value"] = 0.0
+            df["position_weight"] = 1.0
 
         # Vectorized Rolling Sums over Cluster Window (core mechanic, unchanged)
         df["rolling_insider_cluster"] = (

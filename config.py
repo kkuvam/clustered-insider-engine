@@ -52,3 +52,4 @@ class StrategyConfig:
     STOP_LOSS_PCT: Optional[float] = 0.15  # fixed 15% stop-loss from entry price
     TAKE_PROFIT_PCT: Optional[float] = 0.30  # fixed 30% take-profit from entry price
     TRAILING_STOP: bool = False  # fixed stop beat trailing stop in the exit-strategy sweep
+    TRANSACTION_COST_PCT: float = 0.002  # 20 bps round-trip commission + slippage estimate

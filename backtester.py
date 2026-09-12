@@ -13,6 +13,7 @@ class EventBacktester:
         stop_loss_pct: float | None = 0.15,
         take_profit_pct: float | None = None,
         trailing_stop: bool = True,
+        transaction_cost_pct: float = 0.0,
     ):
         """
         :param holding_period_days: Maximum holding period in trading days.
@@ -20,11 +21,14 @@ class EventBacktester:
         :param take_profit_pct: Gain percentage threshold that exits the trade. None disables it.
         :param trailing_stop: True ratchets the stop up from the post-entry high-water mark.
             False fixes the stop at stop_loss_pct below the entry price for the whole trade.
+        :param transaction_cost_pct: Round-trip commission + slippage drag, subtracted
+            from each trade's return. 0.0 disables it.
         """
         self.holding_period = holding_period_days
         self.stop_loss_pct = stop_loss_pct
         self.take_profit_pct = take_profit_pct
         self.trailing_stop = trailing_stop
+        self.transaction_cost_pct = transaction_cost_pct
 
     def execute_trades(self, signal_df: pd.DataFrame) -> pd.DataFrame:
         if signal_df.empty:
@@ -39,6 +43,7 @@ class EventBacktester:
         entry_prices = np.full(n_rows, np.nan)
         exit_prices = np.full(n_rows, np.nan)
         trade_returns = np.full(n_rows, np.nan)
+        position_weights = np.full(n_rows, np.nan)
         exit_reasons = [None] * n_rows
 
         for ticker, group in df.groupby("ticker", sort=False):
@@ -50,6 +55,10 @@ class EventBacktester:
             closes = group["close"].to_numpy()
             highs = group["high"].to_numpy() if "high" in group.columns else closes
             lows = group["low"].to_numpy() if "low" in group.columns else closes
+            weights = (
+                group["position_weight"].to_numpy() if "position_weight" in group.columns
+                else np.ones(n)
+            )
 
             i = 0
             while i < n - 1:
@@ -108,7 +117,7 @@ class EventBacktester:
                                 reason = "TAKE_PROFIT"
                                 break
 
-                    ret = (exit_p - entry_p) / entry_p
+                    ret = (exit_p - entry_p) / entry_p - self.transaction_cost_pct
 
                     # Record trade state
                     global_entry_idx = indices[entry_idx]
@@ -116,6 +125,7 @@ class EventBacktester:
                     entry_prices[global_entry_idx] = entry_p
                     exit_prices[global_entry_idx] = exit_p
                     trade_returns[global_entry_idx] = ret
+                    position_weights[global_entry_idx] = weights[i]
                     exit_reasons[global_entry_idx] = reason
 
                     # Fast-forward pointer to clear active trade window
@@ -127,6 +137,7 @@ class EventBacktester:
         df["entry_price"] = entry_prices
         df["exit_price"] = exit_prices
         df["trade_return"] = trade_returns
+        df["trade_position_weight"] = position_weights
         df["exit_reason"] = exit_reasons
 
         return df
@@ -136,15 +147,20 @@ class EventBacktester:
     ) -> dict:
         if "trade_return" not in backtest_df.columns:
             trades = pd.Series(dtype=float)
+            weights = pd.Series(dtype=float)
         else:
-            trades = backtest_df["trade_return"].dropna()
+            valid = backtest_df["trade_return"].notna()
+            trades = backtest_df.loc[valid, "trade_return"]
+            weights = backtest_df.loc[valid, "trade_position_weight"].fillna(1.0)
 
         anomalies = trades[trades > max_return_threshold]
         if not anomalies.empty:
             print(
                 f"[Warning] Filtered {len(anomalies)} split anomaly trade(s) exceeding {max_return_threshold * 100:.0f}% return."
             )
-            trades = trades[trades <= max_return_threshold]
+            keep = trades <= max_return_threshold
+            trades = trades[keep]
+            weights = weights[keep]
 
         if trades.empty:
             return {
@@ -158,6 +174,8 @@ class EventBacktester:
                 "max_drawdown": 0.0,
                 "max_gain": 0.0,
                 "max_loss": 0.0,
+                "weighted_mean_return": 0.0,
+                "weighted_sharpe_ratio": 0.0,
             }
 
         win_rate = float((trades > 0).mean())
@@ -167,6 +185,15 @@ class EventBacktester:
         sharpe = (
             float(mean_return / std_return * np.sqrt(252 / self.holding_period))
             if std_return > 0
+            else 0.0
+        )
+
+        weighted_mean_return = float(np.average(trades, weights=weights))
+        weighted_variance = float(np.average((trades - weighted_mean_return) ** 2, weights=weights))
+        weighted_std = weighted_variance**0.5
+        weighted_sharpe = (
+            float(weighted_mean_return / weighted_std * np.sqrt(252 / self.holding_period))
+            if weighted_std > 0
             else 0.0
         )
 
@@ -192,4 +219,6 @@ class EventBacktester:
             "max_drawdown": max_drawdown,
             "max_gain": float(trades.max()),
             "max_loss": float(trades.min()),
+            "weighted_mean_return": weighted_mean_return,
+            "weighted_sharpe_ratio": weighted_sharpe,
         }

@@ -59,14 +59,20 @@ class StrategyConfig:
     # Execution Parameters
     HOLDING_PERIODS: Tuple[int, ...] = (30, 60, 90)
     MAX_TRADE_RETURN_CAP: float = 5.0
-    STOP_LOSS_PCT: Optional[float] = 0.15  # fixed 15% stop-loss from entry price
+    # Widened from 0.15 to 0.20 by user choice: at 30-day holding + 50% trail
+    # activation, 0.20 lifts total return from 103.3% to 132.3% for only
+    # -11.46% -> -12.99% extra drawdown (portfolio Sharpe 2.107 -> 2.088).
+    # The same widening hurts 60/90-day much more (drawdown grows to -16.3%),
+    # since this is a single global setting applied to every holding period.
+    STOP_LOSS_PCT: Optional[float] = 0.20  # fixed stop-loss from entry price
     TAKE_PROFIT_PCT: Optional[float] = 0.30  # fixed 30% take-profit from entry price
     TRAILING_STOP: bool = False  # fixed stop beat trailing stop in the exit-strategy sweep
     # Trail only arms once a trade is up TRAIL_ACTIVATION_PCT, staying at the fixed
     # STOP_LOSS_PCT until then. Swept 0.35-0.80 on real data: 0.50 gave the best
-    # risk-adjusted result (60-day portfolio Sharpe 1.28 -> 2.14). Affects only the
-    # rare single-day gap that jumps straight past the take-profit level, letting
-    # the trail capture the real spike instead of an unrealistic flat-30% fill.
+    # risk-adjusted result (60-day portfolio Sharpe 1.28 -> 2.14). Re-adopted after
+    # a detour through 0.30 (see git history). Affects only the rare single-day gap
+    # that jumps straight past the take-profit level, letting the trail capture the
+    # real spike instead of an unrealistic flat-30% fill.
     TRAIL_ACTIVATION_PCT: Optional[float] = 0.50
     TRAIL_PCT: float = 0.15
     TRANSACTION_COST_PCT: float = 0.002  # 20 bps round-trip commission + slippage estimate

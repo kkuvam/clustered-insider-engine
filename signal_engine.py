@@ -18,9 +18,15 @@ Tier-2 refinement applied:
     signal than an arbitrary flat dollar threshold. Insiders with no prior
     purchase history (nothing to compare against) pass by default.
 
-Tier-2 NOT implemented: short-interest overlap and earnings-proximity timing
-have no supporting data anywhere in the local dataset (no short-interest
-feed, no earnings-calendar dates).
+Tier-2 refinement applied:
+  - Short-interest overlap: a signal only counts if the stock's most recent
+    FINRA short-interest reading (days-to-cover) at signal time is >=
+    MIN_DAYS_TO_COVER. Insider buying against a crowded short is a stronger
+    contrarian signal than insider buying alone.
+
+Tier-2 NOT implemented: earnings-proximity timing has no supporting data,
+since the account's Massive plan lacks the Benzinga earnings entitlement
+(fetch_earnings() always returns empty).
 Not implemented:
   - Small-cap / low-coverage tilt — every local raw_fundamentals/*.parquet
     file has the right schema but 0 rows (confirmed across all 4,489 files),
@@ -72,11 +78,43 @@ class VectorizedSignalEngine:
         )
         return df
 
+    def _flag_short_interest_overlap(self, df: pd.DataFrame, short_interest_df: pd.DataFrame) -> pd.DataFrame:
+        """Attaches each day's most recent known days-to-cover reading.
+
+        FINRA short interest is reported bi-weekly, so this carries the last
+        known settlement_date reading forward to every trading day, avoiding
+        lookahead by only looking backward in time (direction="backward").
+        """
+        if short_interest_df.empty:
+            df["days_to_cover"] = pd.NA
+            df["pass_short_interest"] = True
+            return df
+
+        short_interest = short_interest_df.copy()
+        short_interest["settlement_date"] = pd.to_datetime(
+            short_interest["settlement_date"]
+        ).dt.tz_localize(None)
+        short_interest = short_interest.sort_values("settlement_date")
+
+        df = pd.merge_asof(
+            df.sort_values("date"),
+            short_interest[["settlement_date", "days_to_cover"]],
+            left_on="date",
+            right_on="settlement_date",
+            direction="backward",
+        ).drop(columns=["settlement_date"])
+
+        df["pass_short_interest"] = (
+            df["days_to_cover"].isna() | (df["days_to_cover"] >= self.config.MIN_DAYS_TO_COVER)
+        )
+        return df
+
     def generate_signals(
         self,
         price_df: pd.DataFrame,
         insider_df: pd.DataFrame,
         fund_df: pd.DataFrame,
+        short_interest_df: pd.DataFrame,
     ) -> pd.DataFrame:
         df = price_df.copy()
         df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
@@ -150,10 +188,13 @@ class VectorizedSignalEngine:
             & (df["rolling_cluster_value"] >= self.config.MIN_CLUSTER_VALUE)
         )
 
-        # 2. Composite Validation
+        # 2. Tier-2: Short-Interest Overlap
+        df = self._flag_short_interest_overlap(df, short_interest_df)
+
+        # 3. Composite Validation
         # fund_df is accepted for interface compatibility but unused: every local
         # raw_fundamentals file is schema-correct but empty (0 rows), so any
         # market-cap-based filter would be a permanent no-op against this dataset.
-        df["signal_valid"] = df["pass_insider_cluster"]
+        df["signal_valid"] = df["pass_insider_cluster"] & df["pass_short_interest"]
 
         return df

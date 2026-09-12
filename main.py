@@ -28,14 +28,14 @@ def process_single_ticker(
 ) -> pd.DataFrame:
     """Worker function executed concurrently per candidate ticker."""
     try:
-        price_df, insider_df, fund_df, _short_interest_df, _earnings_df = client.load_dataset(
+        price_df, insider_df, fund_df, short_interest_df, _earnings_df = client.load_dataset(
             ticker, start_date=start_date, end_date=end_date
         )
 
         if price_df.empty or len(price_df) < config.MIN_HISTORY_DAYS:
             return pd.DataFrame()
 
-        signal_df = engine.generate_signals(price_df, insider_df, fund_df)
+        signal_df = engine.generate_signals(price_df, insider_df, fund_df, short_interest_df)
         signal_df["ticker"] = ticker
         return signal_df
 

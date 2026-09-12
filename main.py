@@ -121,7 +121,11 @@ def main():
         portfolio = PortfolioSimulator(
             initial_capital=config.INITIAL_CAPITAL, position_size_pct=config.POSITION_SIZE_PCT
         )
-        if config.SIZING_MODE == "compound":
+        if config.SIZING_MODE == "house_money":
+            equity_curve = portfolio.simulate_dynamic(
+                bt_df, mode="house_money", aggressive_pct=config.HOUSE_MONEY_AGGRESSIVE_PCT
+            )
+        elif config.SIZING_MODE == "compound":
             equity_curve = portfolio.simulate_dynamic(bt_df, mode="compound")
         else:
             equity_curve = portfolio.simulate(bt_df)

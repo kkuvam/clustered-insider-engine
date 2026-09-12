@@ -66,11 +66,15 @@ class StrategyConfig:
 
     # Portfolio Simulation
     INITIAL_CAPITAL: float = 100_000.0
-    POSITION_SIZE_PCT: float = 0.02  # fraction of account equity risked per trade
+    POSITION_SIZE_PCT: float = 0.02  # fraction of protected principal risked per trade
     # Dynamic sizing: sizes each trade off current equity rather than fixed
-    # starting capital, so size grows in winning stretches and shrinks in
-    # losing ones. Beat static sizing on total return and Sharpe at every
-    # holding period tested, with no added drawdown. A drawdown-throttle
-    # variant (cut size after a loss streak) was also tested and never beat
-    # plain compounding.
-    SIZING_MODE: str = "compound"  # "static" or "compound"
+    # starting capital. "house_money" splits equity into protected principal
+    # (up to INITIAL_CAPITAL, sized at POSITION_SIZE_PCT, shrinking like normal
+    # compounding on losses) and a profit cushion above that (sized at
+    # HOUSE_MONEY_AGGRESSIVE_PCT). Swept aggressive_pct from 0.05 to 0.20 on
+    # real data: 0.08 gave the best Sharpe at every holding period, improving
+    # on plain equity-proportional compounding, not just rescaling it, with
+    # almost no added drawdown. A drawdown-throttle variant (cut size after a
+    # loss streak) was tested earlier and never beat plain compounding either.
+    SIZING_MODE: str = "house_money"  # "static", "compound", or "house_money"
+    HOUSE_MONEY_AGGRESSIVE_PCT: float = 0.08

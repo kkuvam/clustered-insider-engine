@@ -56,9 +56,11 @@ class PortfolioSimulator:
     def simulate_dynamic(
         self,
         backtest_df: pd.DataFrame,
+        *,
         mode: str = "compound",
         drawdown_threshold: float = 0.10,
         throttle_factor: float = 0.5,
+        aggressive_pct: float = 0.08,
     ) -> pd.DataFrame:
         """Equity curve with position size tied to current account equity.
 
@@ -67,6 +69,13 @@ class PortfolioSimulator:
         mode="throttle": same as fixed sizing, but position_size_pct is cut
         by throttle_factor whenever current equity is drawdown_threshold or
         more below its running peak, and restored once equity recovers.
+        mode="house_money": splits equity into protected principal (up to
+        initial_capital, sized at position_size_pct, shrinking like normal
+        compounding if it takes losses) and a profit cushion above that
+        (sized at the higher aggressive_pct). Lets deeper sizing act on
+        gains without ever risking more than position_size_pct of the
+        original stake, and self-corrects back to the base rate as soon
+        as a losing streak erases the cushion.
         """
         trades = backtest_df[backtest_df["entry_trade"]].dropna(subset=["exit_date", "trade_return"])
         if trades.empty:
@@ -87,9 +96,13 @@ class PortfolioSimulator:
                 drawdown = (equity - peak) / peak if peak > 0 else 0.0
                 pct = self.position_size_pct * throttle_factor if drawdown <= -drawdown_threshold \
                     else self.position_size_pct
+                position_size = equity * pct
+            elif mode == "house_money":
+                safe_base = min(equity, self.initial_capital)
+                cushion = max(equity - self.initial_capital, 0.0)
+                position_size = safe_base * self.position_size_pct + cushion * aggressive_pct
             else:
-                pct = self.position_size_pct
-            position_size = equity * pct
+                position_size = equity * self.position_size_pct
             daily_pnl = sum(r * position_size for r in row["trade_return"])
             equity += daily_pnl
             peak = max(peak, equity)

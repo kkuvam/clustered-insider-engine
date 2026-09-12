@@ -32,7 +32,7 @@ def process_single_ticker(
             ticker, start_date=start_date, end_date=end_date
         )
 
-        if price_df.empty or len(price_df) < config.SMA_PERIOD:
+        if price_df.empty or len(price_df) < config.MIN_HISTORY_DAYS:
             return pd.DataFrame()
 
         signal_df = engine.generate_signals(price_df, insider_df, fund_df)

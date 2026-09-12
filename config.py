@@ -34,11 +34,14 @@ class StrategyConfig:
     CLUSTER_WINDOW_DAYS: int = 5
     MIN_CLUSTER_VALUE: float = 100_000.0  # $100k combined insider purchase volume floor
 
-    # Multi-Factor Filtering Criteria
-    SMA_PERIOD: int = 50
-    MIN_PRICE: float = 5.00
-    MAX_DEBT_TO_EQUITY: float = 2.0
-    MIN_MARKET_CAP: float = 500_000_000.0
+    # Data Sufficiency
+    MIN_HISTORY_DAYS: int = 50  # minimum trading days of price history required
+
+    # Tier-1: Opportunistic vs. Routine Insider Classification (Cohen/Malloy/Pomorski)
+    ROUTINE_MIN_YEARS: int = 3  # same-calendar-month buys in >=N distinct years => routine, excluded
+
+    # Tier-2: Self-Relative Conviction Sizing
+    CONVICTION_SIZE_MULTIPLIER: float = 1.5  # buy must be >= N x insider's own prior avg buy at this ticker
 
     # Execution Parameters
     HOLDING_PERIODS: Tuple[int, ...] = (30, 60, 90)

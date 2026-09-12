@@ -1,5 +1,12 @@
 """
 Data Engineering Client updated to extract SEC Form 4 Rule 10b5-1 plan metadata.
+
+Also adds two new cache-first endpoints not yet consumed by signal_engine.py:
+  - fetch_short_interest(): GET /stocks/v1/short-interest (bi-weekly FINRA data)
+  - fetch_earnings(): GET /benzinga/v1/earnings (partner add-on; requires Benzinga
+    entitlement on your Massive plan -- returns an empty frame if not entitled,
+    since _get_raw treats 401/402/403/404 as non-retryable)
+Neither is wired into load_dataset() yet; call them directly per-ticker.
 """
 from __future__ import annotations
 
@@ -34,11 +41,15 @@ class MassiveDataClient:
         self.raw_prices_dir = self.data_dir / "raw_prices"
         self.raw_insider_dir = self.data_dir / "raw_insider"
         self.raw_fundamentals_dir = self.data_dir / "raw_fundamentals"
+        self.raw_short_interest_dir = self.data_dir / "raw_short_interest"
+        self.raw_earnings_dir = self.data_dir / "raw_earnings"
 
         for directory in [
             self.raw_prices_dir,
             self.raw_insider_dir,
             self.raw_fundamentals_dir,
+            self.raw_short_interest_dir,
+            self.raw_earnings_dir,
         ]:
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -65,7 +76,9 @@ class MassiveDataClient:
                     time.sleep(backoff_factor**attempt)
                     continue
 
-                if response.status_code in (401, 403):
+                if response.status_code in (401, 402, 403, 404):
+                    # Auth/entitlement/not-found errors won't resolve on retry
+                    # (e.g. a partner add-on endpoint your plan doesn't include)
                     return {}
 
                 response.raise_for_status()
@@ -178,8 +191,7 @@ class MassiveDataClient:
             "is_director": "is_director",
             "is_ten_percent_owner": "is_ten_percent_owner",
             "officer_title": "officer_title",
-            "is_three_a_10b5_one_plan": "is_10b5_1",
-            "is_10b5_1": "is_10b5_1",
+            "aff_10b5_one": "is_10b5_1",  # real Massive field name for the 10b5-1 plan flag
         }
         df = df.rename(columns={k: v for k, v in field_mapping.items() if k in df.columns})
 
@@ -252,6 +264,96 @@ class MassiveDataClient:
             ]
 
         df = df.reindex(columns=schema).sort_values("date").reset_index(drop=True)
+        df.to_parquet(cache_file, index=False)
+        return df
+
+    def fetch_short_interest(
+        self, ticker: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """Fetch bi-weekly FINRA short interest via GET /stocks/v1/short-interest."""
+        cache_file = self.raw_short_interest_dir / f"{ticker}_short_interest.parquet"
+        if cache_file.exists():
+            return pd.read_parquet(cache_file)
+
+        endpoint_url = f"{self.base_url}/stocks/v1/short-interest"
+        params = {
+            "ticker": ticker,
+            "settlement_date.gte": start_date,
+            "settlement_date.lte": end_date,
+            "limit": 1000,
+            "sort": "settlement_date.asc",
+        }
+
+        all_results: List[Dict[str, Any]] = []
+        next_url: Optional[str] = endpoint_url
+        current_params: Optional[Dict[str, Any]] = params
+
+        while next_url:
+            json_data = self._get_raw(next_url, params=current_params)
+            results = json_data.get("results", [])
+            all_results.extend(results)
+
+            next_url = json_data.get("next_url")
+            current_params = None
+
+        schema = ["ticker", "settlement_date", "short_interest", "avg_daily_volume", "days_to_cover"]
+        if not all_results:
+            empty_df = pd.DataFrame(columns=schema)
+            empty_df.to_parquet(cache_file, index=False)
+            return empty_df
+
+        df = pd.DataFrame(all_results).reindex(columns=schema)
+        df["settlement_date"] = pd.to_datetime(df["settlement_date"], errors="coerce").dt.tz_localize(None)
+        df = df.dropna(subset=["settlement_date"]).sort_values("settlement_date").reset_index(drop=True)
+
+        df.to_parquet(cache_file, index=False)
+        return df
+
+    def fetch_earnings(self, ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """Fetch historical earnings events via GET /benzinga/v1/earnings.
+
+        Partner add-on endpoint -- if your Massive plan lacks Benzinga
+        entitlement this returns an empty frame rather than raising.
+        """
+        cache_file = self.raw_earnings_dir / f"{ticker}_earnings.parquet"
+        if cache_file.exists():
+            return pd.read_parquet(cache_file)
+
+        endpoint_url = f"{self.base_url}/benzinga/v1/earnings"
+        params = {
+            "ticker": ticker,
+            "date.gte": start_date,
+            "date.lte": end_date,
+            "limit": 1000,
+            "sort": "date.asc",
+        }
+
+        all_results: List[Dict[str, Any]] = []
+        next_url: Optional[str] = endpoint_url
+        current_params: Optional[Dict[str, Any]] = params
+
+        while next_url:
+            json_data = self._get_raw(next_url, params=current_params)
+            results = json_data.get("results", [])
+            all_results.extend(results)
+
+            next_url = json_data.get("next_url")
+            current_params = None
+
+        schema = [
+            "ticker", "date", "fiscal_period", "fiscal_year", "date_status",
+            "actual_eps", "estimated_eps", "eps_surprise_percent",
+            "actual_revenue", "estimated_revenue", "revenue_surprise_percent",
+        ]
+        if not all_results:
+            empty_df = pd.DataFrame(columns=schema)
+            empty_df.to_parquet(cache_file, index=False)
+            return empty_df
+
+        df = pd.DataFrame(all_results).reindex(columns=schema)
+        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.tz_localize(None)
+        df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+
         df.to_parquet(cache_file, index=False)
         return df
 

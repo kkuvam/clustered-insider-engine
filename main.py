@@ -114,6 +114,8 @@ def main():
             take_profit_pct=config.TAKE_PROFIT_PCT,
             trailing_stop=config.TRAILING_STOP,
             transaction_cost_pct=config.TRANSACTION_COST_PCT,
+            trail_activation_pct=config.TRAIL_ACTIVATION_PCT,
+            trail_pct=config.TRAIL_PCT,
         )
         bt_df = backtester.execute_trades(combined_signals_df)
         metrics = backtester.compute_performance(bt_df)

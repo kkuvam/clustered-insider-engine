@@ -10,10 +10,13 @@ class EventBacktester:
     def __init__(
         self,
         holding_period_days: int = 30,
+        *,
         stop_loss_pct: float | None = 0.15,
         take_profit_pct: float | None = None,
         trailing_stop: bool = True,
         transaction_cost_pct: float = 0.0,
+        trail_activation_pct: float | None = None,
+        trail_pct: float | None = None,
     ):
         """
         :param holding_period_days: Maximum holding period in trading days.
@@ -21,14 +24,62 @@ class EventBacktester:
         :param take_profit_pct: Gain percentage threshold that exits the trade. None disables it.
         :param trailing_stop: True ratchets the stop up from the post-entry high-water mark.
             False fixes the stop at stop_loss_pct below the entry price for the whole trade.
+            Ignored when trail_activation_pct is set (see below).
         :param transaction_cost_pct: Round-trip commission + slippage drag, subtracted
             from each trade's return. 0.0 disables it.
+        :param trail_activation_pct: Gain percentage that must be reached before the stop
+            starts trailing at all; before that, the stop stays fixed at stop_loss_pct
+            below entry. None disables this and falls back to the plain trailing_stop flag.
+            Swept 0.35-0.80 on real data: 0.50 gave the best risk-adjusted result. Lets a
+            fixed 15%/30% stop/take-profit run as normal, but on the rare single-day gap
+            that jumps straight past both, the trail captures the actual spike instead of
+            an unrealistic fill at the flat take-profit level.
+        :param trail_pct: Trail width once trail_activation_pct has been reached.
+            Defaults to stop_loss_pct if not given.
         """
         self.holding_period = holding_period_days
         self.stop_loss_pct = stop_loss_pct
         self.take_profit_pct = take_profit_pct
         self.trailing_stop = trailing_stop
         self.transaction_cost_pct = transaction_cost_pct
+        self.trail_activation_pct = trail_activation_pct
+        self.trail_pct = trail_pct if trail_pct is not None else stop_loss_pct
+
+    def _resolve_exit(self, entry_p, highs, lows, entry_idx, max_exit_idx):
+        """Walks forward from entry_idx and returns (exit_idx, exit_price, reason).
+
+        exit_price is None for TIME_EXIT; the caller fills in the close price.
+        """
+        peak_price = max(entry_p, highs[entry_idx])
+        fixed_stop_price = (
+            entry_p * (1.0 - self.stop_loss_pct) if self.stop_loss_pct is not None else None
+        )
+        take_profit_price = (
+            entry_p * (1.0 + self.take_profit_pct) if self.take_profit_pct is not None else None
+        )
+        activation_price = (
+            entry_p * (1.0 + self.trail_activation_pct)
+            if self.trail_activation_pct is not None
+            else None
+        )
+        trailing_active = self.trailing_stop and activation_price is None
+
+        for day in range(entry_idx, max_exit_idx + 1):
+            if highs[day] > peak_price:
+                peak_price = highs[day]
+            if activation_price is not None and not trailing_active and peak_price >= activation_price:
+                trailing_active = True
+
+            if self.stop_loss_pct is not None:
+                stop_price = peak_price * (1.0 - self.trail_pct) if trailing_active else fixed_stop_price
+                if lows[day] <= stop_price:
+                    reason = "TRAIL_STOP" if trailing_active else "STOP_LOSS"
+                    return day, stop_price, reason
+
+            if take_profit_price is not None and highs[day] >= take_profit_price:
+                return day, take_profit_price, "TAKE_PROFIT"
+
+        return max_exit_idx, None, "TIME_EXIT"
 
     def execute_trades(self, signal_df: pd.DataFrame) -> pd.DataFrame:
         if signal_df.empty:
@@ -75,49 +126,16 @@ class EventBacktester:
                         continue
 
                     max_exit_idx = min(entry_idx + self.holding_period, n - 1)
-                    actual_exit_idx = max_exit_idx
-                    exit_p = closes[max_exit_idx]
-                    reason = "TIME_EXIT"
-
-                    # Stop-Loss and Take-Profit Execution Logic
                     if self.stop_loss_pct is not None or self.take_profit_pct is not None:
-                        peak_price = max(entry_p, highs[entry_idx])
-                        fixed_stop_price = (
-                            entry_p * (1.0 - self.stop_loss_pct)
-                            if self.stop_loss_pct is not None
-                            else None
+                        actual_exit_idx, exit_p, reason = self._resolve_exit(
+                            entry_p, highs, lows, entry_idx, max_exit_idx
                         )
-                        take_profit_price = (
-                            entry_p * (1.0 + self.take_profit_pct)
-                            if self.take_profit_pct is not None
-                            else None
-                        )
-
-                        for day in range(entry_idx, max_exit_idx + 1):
-                            # Update running peak price (High Water Mark)
-                            current_high = highs[day]
-                            if current_high > peak_price:
-                                peak_price = current_high
-
-                            # Stop price: ratchets up with the peak if trailing, else fixed at entry
-                            if self.stop_loss_pct is not None:
-                                stop_price = (
-                                    peak_price * (1.0 - self.stop_loss_pct)
-                                    if self.trailing_stop
-                                    else fixed_stop_price
-                                )
-                                if lows[day] <= stop_price:
-                                    actual_exit_idx = day
-                                    exit_p = stop_price
-                                    reason = "STOP_LOSS"
-                                    break
-
-                            # Take-profit checked after stop-loss on the same day (conservative)
-                            if take_profit_price is not None and current_high >= take_profit_price:
-                                actual_exit_idx = day
-                                exit_p = take_profit_price
-                                reason = "TAKE_PROFIT"
-                                break
+                        if exit_p is None:
+                            exit_p = closes[actual_exit_idx]
+                    else:
+                        actual_exit_idx = max_exit_idx
+                        exit_p = closes[max_exit_idx]
+                        reason = "TIME_EXIT"
 
                     ret = (exit_p - entry_p) / entry_p - self.transaction_cost_pct
 

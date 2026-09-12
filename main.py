@@ -64,7 +64,7 @@ def main():
     print(f"\n=== Executing Accelerated Engine across {len(universe)} Dynamic Tickers ===")
 
     all_signals = []
-    max_workers = 12  # Increased worker threads for market-scale execution
+    max_workers = 20  # Increased worker threads for market-scale execution
 
     # 2. Multithreaded parallel signal generation across full market universe
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

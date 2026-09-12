@@ -44,7 +44,7 @@ class StrategyConfig:
     CONVICTION_SIZE_MULTIPLIER: float = 1.5  # buy must be >= N x insider's own prior avg buy at this ticker
 
     # Tier-2: Short Interest Overlap
-    MIN_DAYS_TO_COVER: float = 1.0  # signal requires short-side days-to-cover >= N at time of signal
+    MIN_DAYS_TO_COVER: float = 2.0  # signal requires short-side days-to-cover >= N at time of signal
 
     # Execution Parameters
     HOLDING_PERIODS: Tuple[int, ...] = (30, 60, 90)

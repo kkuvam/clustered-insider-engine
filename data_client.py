@@ -19,6 +19,8 @@ from urllib.parse import parse_qs, urlparse
 import pandas as pd
 import requests
 
+pd.set_option("future.no_silent_downcasting", True)
+
 from config import DATA_DIR, MASSIVE_API_KEY, MASSIVE_BASE_URL
 
 

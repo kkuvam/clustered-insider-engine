@@ -41,6 +41,7 @@ def process_single_ticker(
         return signal_df
 
     except Exception as exc:
+        print(f"  [Warning] {ticker}: skipped due to {type(exc).__name__}: {exc}")
         return pd.DataFrame()
 
 

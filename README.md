@@ -4,10 +4,12 @@ A research-oriented Python pipeline for identifying clustered insider purchases 
 
 This repository is intended for quantitative researchers and developers who want a reproducible, auditable pipeline for exploring how clustered insider transactions relate to subsequent stock performance.
 
+See `research_report.md` for the full research report, `decision_log.csv` for the dated record of decisions made during the project, and `experiment_record.csv` for every experiment tested, including the ones that were rejected. Reproducible sweep and validation code lives under `experiments/`.
+
 Key goals:
 
 - Discover and quantify clusters of insider purchases across public equities.
-- Combine insider signals with technical and fundamental filters.
+- Combine insider signals with conviction, short-interest, and liquidity filters (see `research_report.md` for why fundamental and technical-trend filters were tried and dropped).
 - Backtest a straightforward entry/exit rule set over historical market data.
 - Produce reproducible artifacts (Parquet datasets, trade logs, and backtest summaries) for analysis.
 
@@ -27,6 +29,8 @@ Table of contents
 - Development notes
 - Contributing
 - License
+- Experiments
+- Assistance and source disclosure
 
 ---
 
@@ -43,7 +47,7 @@ The project is organized around a small set of Python modules that each have a s
 
 - universe_scanner.py — scan a list of tickers (or the entire available universe) to identify stocks with multiple insider purchases in a short time window (a "cluster").
 - data_client.py — retrieves market prices, insider transactions, and fundamentals from the Massive API, and writes Parquet cache files under `data/`.
-- signal_engine.py — implements the rules that combine insider-cluster detection with technical (e.g., moving averages, volume) and fundamental filters.
+- signal_engine.py — implements the rules that combine insider-cluster detection with opportunistic-vs-routine classification, conviction sizing, short-interest overlap, and a dollar-volume liquidity ceiling (see the module docstring for filters that were tried and dropped, including fundamentals and a moving-average trend filter).
 - backtester.py — simulates entries and exits, supports next-open entry, trailing stop logic, and time-based exits (e.g., 30/60/90 day holds).
 - main.py — orchestrates a full-market run that glues the modules together and produces the final results.
 
@@ -148,10 +152,22 @@ License
 
 This repository is provided for research purposes. Add your preferred license file if you plan to publish or share it publicly.
 
----
+Experiments
 
-If you'd like, I can also:
+`experiments/` holds reproducible scripts for the sweeps and validation checks described in `research_report.md`, built on the same cached data and the same production classes as `main.py`:
 
-- Add usage examples with expected CSV/Parquet schemas for downstream analysis tools (Pandas, DuckDB).
-- Add a CI job to run the API smoke test (skipped by default) and basic linting.
-- Create a CONTRIBUTING.md template and a LICENSE file.
+```bash
+python experiments/exit_and_sizing_sweep.py   # exit-mechanic and sizing-mode sweep
+python experiments/validation_suite.py        # chronological split, bootstrap CI, cost stress test, cash check
+```
+
+Each script writes its own results CSV next to itself (`exit_and_sizing_results.csv`, `validation_results.csv`).
+
+Assistance and source disclosure
+
+- Author's own work: the author owns every hypothesis, every parameter and risk-management choice, and the decision to accept or reject each experiment's result throughout the project.
+- Academic paper consulted: Cohen, Malloy, and Pomorski, "Decoding Inside Information," Journal of Finance, 2012, for the opportunistic-vs-routine insider classification used in `signal_engine.py`.
+- External datasets: none integrated. Massive is the sole data source for every filter and signal in production. Financial Modeling Prep, Finnhub, and Polygon.io were researched as alternative fundamentals providers once the Massive fundamentals endpoint returned empty for every ticker, but none was wired into the pipeline.
+- Existing code or tutorials consulted: none beyond the Massive API's own documentation.
+- AI tools: Google Gemini was used with the author to generate and edit the original baseline pipeline (`universe_scanner.py`, `data_client.py`, `signal_engine.py`, `backtester.py`, `main.py`, and the first version of this README). From that baseline onward, Claude Code (Anthropic) was used to implement the Tier-1/Tier-2 signal filters and every later filter, to run the exit-mechanic, position-sizing, and validation experiments the author directed, to find and fix the look-ahead sizing bug described in `research_report.md`, and to draft `research_report.md`, `decision_log.csv`, and `experiment_record.csv` from the author's decisions and working notes. The author directed and is responsible for every part of this submission.
+- Other human assistance: none.

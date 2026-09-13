@@ -44,3 +44,6 @@ data/
 
 # Local Claude Code instructions
 CLAUDE.md
+
+# Local specs
+specs/decision_journal.md

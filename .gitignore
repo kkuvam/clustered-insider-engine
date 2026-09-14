@@ -42,7 +42,7 @@ data/
 # OS files
 .DS_Store
 
-# Local Claude Code instructions
+# Local assistant instructions, not for the public repo
 CLAUDE.md
 
 # Local specs

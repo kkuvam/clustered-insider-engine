@@ -88,13 +88,9 @@ python test_api.py
 
 ### 2. Universe Scanning
 
-Run the scanner to identify candidate tickers with clustered insider purchases:
-
-```bash
-python universe_scanner.py
-```
-
-This produces a list of tickers (cached) that meet the cluster criteria.
+`universe_scanner.py` scans market-wide Form 4 filings to identify candidate tickers with
+clustered insider purchases. It has no standalone entry point; `main.py` invokes it directly
+and caches the resulting ticker list under `data/universe_cache/` for reuse on later runs.
 
 ### 3. Data Collection
 
